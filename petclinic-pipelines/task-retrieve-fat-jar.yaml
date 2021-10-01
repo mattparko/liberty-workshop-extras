@@ -1,0 +1,30 @@
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: retrieve-fat-jar
+  labels:
+    app.kubernetes.io/version: "0.2"
+  annotations:
+    tekton.dev/pipelines.minVersion: "0.12.1"
+    tekton.dev/tags: build-tool
+spec:
+  description: >-
+    This task downloads the fat jar
+
+  workspaces:
+    - name: source
+      description: The workspace
+
+  params:
+    - name: SOURCE_JAR
+      type: string
+      description: URL for the source fat jar
+      default: https://nexus.example.com/example/example-app.jar
+
+  steps:
+    - name: retrieve-fat-jar
+      image: registry.access.redhat.com/ubi8/ubi-minimal:8.4
+      script: |
+        #!/usr/bin/env bash
+
+        curl -o /workspace/source/app.jar $(params.SOURCE_JAR)

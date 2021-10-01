@@ -1,0 +1,206 @@
+apiVersion: tekton.dev/v1beta1
+kind: Pipeline
+metadata:
+  name: spring-tomcat-to-liberty
+  annotations:
+    description: |
+      Take a pre-built Spring fat jar and optimise for IBM Liberty
+spec:
+  params:
+  - name: APP_NAME
+    type: string
+    description: App name to use if deploying image into test namespace
+    default: my-app
+  - name: IMAGE_NAME
+    type: string
+    description: The name of the image to build
+    default: quay.io/username/repository
+  - name: SOURCE_JAR
+    type: string
+    description: URL for the source fat jar
+    default: https://nexus.example.com/example/example-app.jar
+  - name: BUILDER_IMAGE_REPO
+    type: string
+    default: https://github.com/mattparko/dockerfiles
+    description: The git repository containing a builder image definition
+  - name: BUILDER_IMAGE_REPO_REVISION
+    type: string
+    default: main
+    description: The builder image git repository revision
+  - name: BUILDER_FILE
+    type: string
+    default: ./Dockerfile.spring-tomcat-to-liberty
+    description: The Dockerfile location in the builder image git repository
+  - name: DEPLOY_TO_TEST
+    type: string
+    description: Deploy the built image using the OpenLiberty operator (true/false)
+    default: "false"
+  - name: NAMESPACE_TEST
+    type: string
+    description: Test namespace where the Liberty build will be deployed
+    default: my-namespace-test
+  - name: DEPLOY_TO_PROD
+    type: string
+    description: Deploy the built image using OpenShift GitOps (true/false)
+    default: "false"
+  - name: PROD_GITOPS_REPO
+    type: string
+    description: Git repo that holds production manifests (ssh only for now)
+    default: git@github.com/examplecom/openshift-manifests.git
+  - name: PROD_LIBERTY_MANIFEST
+    type: string
+    description: Relative path to the Open Liberty Application manifest
+    default: ./production/open-liberty-app-1.yaml
+  - name: PROD_GITOPS_USER
+    type: string
+    description: Username for the GitOps commit user
+    default: openshift-pipelines
+  - name: PROD_GITOPS_EMAIL
+    type: string
+    description: Email for the GitOps commit user
+    default: openshift-pipelines@example.com
+  workspaces:
+  - name: app-source
+  - name: ssh-creds
+  - name: git-cli-working-dir
+
+  tasks:
+  - name: git-clone
+    taskRef:
+      kind: ClusterTask
+      name: git-clone
+    params:
+    - name: url
+      value: $(params.BUILDER_IMAGE_REPO)
+    - name: revision
+      value: $(params.BUILDER_IMAGE_REPO_REVISION)
+    - name: deleteExisting
+      value: 'true'
+    workspaces:
+    - name: output
+      workspace: app-source
+
+  - name: generate-tag
+    taskRef:
+      kind: Task
+      name: generate-tag
+  
+  - name: retrieve-fat-jar
+    runAfter:
+    - git-clone
+    taskRef:
+      kind: Task
+      name: retrieve-fat-jar
+    params:
+    - name: SOURCE_JAR
+      value: $(params.SOURCE_JAR)
+    workspaces:
+    - name: source
+      workspace: app-source
+
+  - name: image-build
+    runAfter:
+    - generate-tag
+    - retrieve-fat-jar
+    taskRef:
+      kind: ClusterTask
+      name: buildah
+    params:
+    - name: IMAGE
+      value: $(params.IMAGE_NAME):$(tasks.generate-tag.results.image-tag)
+    - name: DOCKERFILE
+      value: $(params.BUILDER_FILE)
+    - name: BUILD_EXTRA_ARGS
+      value: "--build-arg TARGET_JAR=app.jar"
+    workspaces:
+    - name: source
+      workspace: app-source
+
+  - name: run-tests-1-a
+    runAfter:
+    - image-build
+    taskRef:
+      kind: Task
+      name: run-liberty-tests
+
+  - name: run-tests-1-b
+    runAfter:
+    - image-build
+    taskRef:
+      kind: Task
+      name: run-liberty-tests
+
+  - name: deploy-to-test
+    when:
+    - input: "$(params.DEPLOY_TO_TEST)"
+      operator: in
+      values: ["true"]
+    runAfter:
+    - run-tests-1-a
+    - run-tests-1-b
+    taskRef:
+      kind: Task
+      name: deploy-with-liberty-operator
+    params:
+    - name: IMAGE
+      value: $(params.IMAGE_NAME):$(tasks.generate-tag.results.image-tag)
+    - name: NAMESPACE
+      value: $(params.NAMESPACE_TEST)
+    - name: DEPLOYMENT_NAME
+      value: $(params.APP_NAME)-$(tasks.generate-tag.results.image-tag)
+
+  - name: run-tests-2-a
+    runAfter:
+    - deploy-to-test
+    taskRef:
+      kind: Task
+      name: run-liberty-tests
+
+  - name: run-tests-2-b
+    runAfter:
+    - deploy-to-test
+    taskRef:
+      kind: Task
+      name: run-liberty-tests
+
+  - name: deploy-to-prod
+    when:
+    - input: "$(params.DEPLOY_TO_PROD)"
+      operator: in
+      values: ["true"]
+    runAfter:
+    - run-tests-2-a
+    - run-tests-2-b
+    taskRef:
+      kind: Task
+      name: git-cli
+    params:
+    - name: GIT_USER_NAME
+      value: $(params.PROD_GITOPS_USER)
+    - name: GIT_USER_EMAIL
+      value: $(params.PROD_GITOPS_EMAIL)
+    - name: GIT_SCRIPT
+      value: |
+        echo "Cloning git repo $(params.PROD_GITOPS_REPO)..."
+        git clone $(params.PROD_GITOPS_REPO) gitops_repo
+        cd gitops_repo
+
+        export IMAGE=$(params.IMAGE_NAME):$(tasks.generate-tag.results.image-tag)
+
+        echo "Updating application image to $IMAGE in $(params.PROD_LIBERTY_MANIFEST)..."
+        sed -i 's|applicationImage: .*$|applicationImage: '$IMAGE'|' $(params.PROD_LIBERTY_MANIFEST)
+
+        echo "Pushing changes to $(params.PROD_GITOPS_REPO)..."
+        git add $(params.PROD_LIBERTY_MANIFEST)
+        git commit -m "[OpenShift Pipelines] Update image in $(params.PROD_LIBERTY_MANIFEST)"
+        git push
+    workspaces:
+    - name: basic-auth
+      workspace: git-credentials
+    - name: source
+      workspace: git-cli-working-dir
+
+  results:
+  - name: final-image
+    description: Final image name and tag
+    value: $(params.IMAGE_NAME):$(tasks.generate-tag.results.image-tag)

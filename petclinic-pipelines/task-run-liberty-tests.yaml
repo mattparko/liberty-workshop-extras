@@ -1,0 +1,21 @@
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: run-liberty-tests
+  annotations:
+    description: |
+      Currently a dummy task to simulate running test cases for
+      an Open Liberty Application. No reason it can't be built
+      upon by someone that knows what they are doing.
+spec:
+  steps:
+  - name: dummy-tests
+    image: registry.access.redhat.com/ubi8/ubi-minimal:8.4
+    script: |
+      #!/usr/bin/env bash
+      echo "Running Open Liberty test cases..."
+      for i in {1..10}; do
+        sleep 1
+        echo "."
+      done
+      echo "Completed Open Liberty test cases"

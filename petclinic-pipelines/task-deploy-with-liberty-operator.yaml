@@ -1,0 +1,53 @@
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: deploy-with-liberty-operator
+spec:
+  params:
+  - name: IMAGE
+    description: The image to deploy
+    type: string
+    default: ""
+  - name: NAMESPACE
+    description: The namespace to deploy into
+    type: string
+    default: ""
+  - name: DEPLOYMENT_NAME
+    description: The name for the deployment
+    type: string
+    default: ""
+
+  steps:
+  - name: deploy
+    image: image-registry.openshift-image-registry.svc:5000/openshift/cli:latest
+    script: |
+      #!/usr/bin/env bash
+
+      echo "Creating the following resource..."
+      echo
+      echo "apiVersion: openliberty.io/v1beta1
+      kind: OpenLibertyApplication
+      metadata:
+        name: $(params.DEPLOYMENT_NAME)
+        labels:
+          app: $(params.DEPLOYMENT_NAME)
+      spec:
+        expose: true
+        applicationImage: $(params.IMAGE)
+        replicas: 1
+      "
+      
+      echo
+      echo "Using this command: oc apply -n $(params.NAMESPACE) -f -"
+      echo
+
+      echo "apiVersion: openliberty.io/v1beta1
+      kind: OpenLibertyApplication
+      metadata:
+        name: $(params.DEPLOYMENT_NAME)
+        labels:
+          app: $(params.DEPLOYMENT_NAME)
+      spec:
+        expose: true
+        applicationImage: $(params.IMAGE)
+        replicas: 1" | oc apply -n $(params.NAMESPACE) -f -
