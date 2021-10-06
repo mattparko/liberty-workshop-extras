@@ -61,7 +61,7 @@ spec:
     default: openshift-pipelines@example.com
   workspaces:
   - name: app-source
-  - name: ssh-creds
+  - name: git-credentials
   - name: git-cli-working-dir
 
   tasks:
