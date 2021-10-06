@@ -31,6 +31,10 @@ spec:
     type: string
     default: ./Dockerfile.spring-tomcat-to-liberty
     description: The Dockerfile location in the builder image git repository
+  - name: BUILDER_BASE_IMAGE
+    type: string
+    default: quay.io/mparkins/openliberty:spring-java8
+    description: The base container image used to build and host our application
   - name: DEPLOY_TO_TEST
     type: string
     description: Deploy the built image using the OpenLiberty operator (true/false)
@@ -111,7 +115,7 @@ spec:
     - name: DOCKERFILE
       value: $(params.BUILDER_FILE)
     - name: BUILD_EXTRA_ARGS
-      value: "--build-arg TARGET_JAR=app.jar"
+      value: "--build-arg TARGET_JAR=app.jar --build-arg=$(params.BUILDER_BASE_IMAGE)"
     workspaces:
     - name: source
       workspace: app-source
